@@ -50,6 +50,11 @@ namespace Vlc.DotNet.Wpf
 
         private Dispatcher dispatcher;
 
+        /// <summary>
+        /// Event fired when state of media file being played changes
+        /// </summary>
+        public event EventHandler<VlcMediaPlayerStateChangedEventArgs> StateChanged;
+
         public VlcVideoSourceProvider(Dispatcher dispatcher)
         {
             this.dispatcher = dispatcher;
@@ -98,6 +103,45 @@ namespace Vlc.DotNet.Wpf
         }
 
         /// <summary>
+        /// Gets or sets the volume of audio, if <see cref="MediaPlayer"/> is null the default value is -1
+        /// </summary>
+        public int Volume
+        {
+            get
+            {
+                return !playerCreated ?-1:MediaPlayer.Audio.Volume;
+            }
+            set
+            {
+                if (playerCreated)
+                    MediaPlayer.Audio.Volume = value;
+            }
+        }
+
+
+        private long currentTime;
+
+        /// <summary>
+        /// The elapsed time of the media being played
+        /// </summary>
+        public long Time
+        {
+            get
+            {
+                return currentTime;
+            }
+            set
+            {
+                if(currentTime!=value)
+                {
+                    currentTime = value;
+                    MediaPlayer.Time = value;
+                }
+                OnPropertyChanged(nameof(Time));
+            }
+        }
+
+        /// <summary>
         /// Creates the player. This method must be called before using <see cref="MediaPlayer"/>
         /// </summary>
         /// <param name="vlcLibDirectory">The directory where to find the vlc library</param>
@@ -112,6 +156,47 @@ namespace Vlc.DotNet.Wpf
             this.MediaPlayer.SetVideoCallbacks(LockVideo, null, DisplayVideo, IntPtr.Zero);
 
             playerCreated = true;
+
+            //Set event handler when state of media file changes
+            MediaPlayer.TimeChanged += MediaPlayer_TimeChanged;
+            MediaPlayer.EndReached += MediaPlayer_EndReached;
+            MediaPlayer.Playing += MediaPlayer_Playing;
+            MediaPlayer.Paused += MediaPlayer_Paused;
+        }
+
+        private void MediaPlayer_Paused(object sender, VlcMediaPlayerPausedEventArgs e)
+        {
+            OnStateChanged(sender, new VlcMediaPlayerStateChangedEventArgs(MediaPlayer.State));
+        }
+
+        private void MediaPlayer_Playing(object sender, VlcMediaPlayerPlayingEventArgs e)
+        {
+            OnStateChanged(sender, new VlcMediaPlayerStateChangedEventArgs(MediaPlayer.State));
+        }
+
+        protected void OnStateChanged(object sender,VlcMediaPlayerStateChangedEventArgs e)
+        {
+            StateChanged?.Invoke(sender, e);
+        }
+
+        private void MediaPlayer_EndReached(object sender, VlcMediaPlayerEndReachedEventArgs e)
+        {
+            if(MediaPlayer.State==MediaStates.Ended)
+            {
+                var vlcPlayer = sender as VlcMediaPlayer;
+                if(vlcPlayer!=null)
+                {
+                    currentTime = vlcPlayer.Length;
+                    Time = vlcPlayer.Length;
+                }
+            }
+            OnStateChanged(sender, new VlcMediaPlayerStateChangedEventArgs(MediaPlayer.State));
+        }
+
+        private void MediaPlayer_TimeChanged(object sender, VlcMediaPlayerTimeChangedEventArgs e)
+        {
+            currentTime = e.NewTime;
+            Time = e.NewTime;
         }
 
         /// <summary>
@@ -281,6 +366,15 @@ namespace Vlc.DotNet.Wpf
             {
                 disposedValue = true;
                 this.MediaPlayer?.Dispose();
+
+                if (MediaPlayer != null)
+                {
+                    MediaPlayer.TimeChanged -= MediaPlayer_TimeChanged;
+                    MediaPlayer.EndReached -= MediaPlayer_EndReached;
+                    MediaPlayer.Playing -= MediaPlayer_Playing;
+                    MediaPlayer.Paused -= MediaPlayer_Paused;
+                }
+
                 this.MediaPlayer = null;
                 this.dispatcher.BeginInvoke((Action)this.RemoveVideo);
             }
